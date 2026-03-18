@@ -10,8 +10,6 @@ COMP5423 NLP Group Project
 """
 
 import os
-from dotenv import load_dotenv
-load_dotenv()  # 自动读取 .env 文件
 import html as html_mod
 import json
 import re
@@ -995,7 +993,7 @@ CSS = """
 }
 """
 
-with gr.Blocks(title="豆豆回家记", theme=gr.themes.Soft(), css=CSS) as demo:
+with gr.Blocks(title="豆豆回家记") as demo:
 
     gr.Markdown("# 🐾 豆豆回家记 · StoryWeaver v4.0")
     progress_html = gr.HTML()
@@ -1003,7 +1001,7 @@ with gr.Blocks(title="豆豆回家记", theme=gr.themes.Soft(), css=CSS) as demo
     with gr.Row(equal_height=False):
         # ── 左：故事 + 行动 ────────────────────────────────────────────────────
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(label="故事", height=460, bubble_full_width=False)
+            chatbot = gr.Chatbot(label="故事", height=460)
             with gr.Group():
                 gr.HTML("<div style='font-size:12px;font-weight:600;color:#6b7280;padding:6px 4px 2px'>行动</div>")
                 with gr.Row(elem_classes="action-row"):
@@ -1070,4 +1068,4 @@ with gr.Blocks(title="豆豆回家记", theme=gr.themes.Soft(), css=CSS) as demo
 
 
 if __name__ == "__main__":
-    demo.launch(share=False)
+    demo.launch(share=False, theme=gr.themes.Soft(), css=CSS)
