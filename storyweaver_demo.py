@@ -656,11 +656,11 @@ def render_history(history):
     msgs = []
     for role, text in history:
         if role == "narrator":
-            msgs.append((None, "📖 " + text))
+            msgs.append({"role": "assistant", "content": "📖 " + text})
         elif role == "npc":
-            msgs.append((None, text))
+            msgs.append({"role": "assistant", "content": text})
         elif role == "player":
-            msgs.append(("▶ " + text, None))
+            msgs.append({"role": "user", "content": "▶ " + text})
     return msgs
 
 def render_end(gs):
@@ -687,7 +687,7 @@ def render_end(gs):
         + str(n_comp) + "位同伴 / "
         + str(gs["turn"]) + "回合"
     )
-    return [(None, "🎉 **豆豆找到主人了！**\n\n" + ending + "\n\n" + summary)]
+    return [{"role": "assistant", "content": "🎉 **豆豆找到主人了！**\n\n" + ending + "\n\n" + summary}]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
