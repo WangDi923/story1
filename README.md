@@ -5,7 +5,7 @@ colorFrom: red
 colorTo: purple
 sdk: gradio
 sdk_version: 6.9.0
-app_file: app.py
+app_file: storyweaver_demo.py
 pinned: false
 ---
 
