@@ -1,13 +1,13 @@
 ---
-title: storyweaver          # 显示在 Space 页面标题
-emoji: 🚀                   # 选择一个表情符号
-colorFrom: blue             # UI 主题色起始色
-colorTo: purple             # UI 主题色结束色
-sdk: gradio                 # 固定为 gradio
-sdk_version: "3.50.0"        # 改为你实际使用的 Gradio 版本
-python_version: "3.8"      # 推荐 3.10 或更高
-app_file: app.py            # 你的主程序文件名（默认 app.py）
-pinned: false               # 是否置顶，保持 false 即可
+title: storyweaver
+emoji: 🚀
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 4.0.0
+python_version: '3.8'
+app_file: app.py
+pinned: false
 ---
 # 🐾 巴蒂的回家路 — 交互式文本冒险游戏
 
