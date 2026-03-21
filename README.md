@@ -1,3 +1,12 @@
+---
+title: storyweaver          # 显示在 Space 页面标题
+emoji: 🚀                   # 选择一个表情符号
+colorFrom: blue             # UI 主题色起始色
+colorTo: purple             # UI 主题色结束色
+sdk: gradio                 # 固定为 gradio
+app_file: app.py            # 你的主程序文件名（默认 app.py）
+pinned: false               # 是否置顶，保持 false 即可
+---
 # 🐾 巴蒂的回家路 — 交互式文本冒险游戏
 
 > NLP 课程设计 · Python 3.8+ · DeepSeek API · Gradio 4.x
