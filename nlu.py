@@ -18,17 +18,17 @@ VALID_INTENTS = [
     "EXPLORE",  # 移动到某地点
     "EXAMINE",  # 仔细检查某物品
     "APPROACH", # 温柔靠近某人或动物
-    "ASK",      # 向某人提问求助
-    "BARK",     # 吠叫引起注意
+    "BARK",     # 吠叫（对某个目标）
     "FOLLOW",   # 跟随某人或动物
-    "HIDE",     # 躲藏避险
-    "WAIT",     # 休息等待（无特定目标）
-    "OBSERVE",  # 主动观察/等待特定目标
+    "HIDE",     # 躲藏
+    "WAIT",     # 休息等待/安静陪伴
+    "OBSERVE",  # 主动观察/蹲守
+    "GIVE",     # 把物品交给某人/动物
     "UNKNOWN",  # 无法识别
 ]
 
 _NLU_SYSTEM = """你是文字冒险游戏《寻家记》的NLU模块。
-主角是柴犬小饼，在城市公园寻找走散的主人小明。
+主角是流浪小狗小饼，在不同场景中与NPC互动。
 
 你的任务：将玩家输入分类为意图+实体。
 
@@ -37,19 +37,19 @@ _NLU_SYSTEM = """你是文字冒险游戏《寻家记》的NLU模块。
 - EXPLORE: 移动/前往/去看某地点
 - EXAMINE: 仔细检查/查看某具体物品
 - APPROACH: 温柔靠近某人或动物（慢慢走近、蹭、趴在旁边）
-- ASK: 向某人提问或求助
 - BARK: 吠叫/叫/汪汪（对某个目标）
 - FOLLOW: 跟随某人或动物
-- HIDE: 躲藏/藏起来
-- WAIT: 休息/等待/什么都不做（无特定目标）
-- OBSERVE: 主动盯着/等某个具体目标
+- HIDE: 躲藏/藏起来/蹲守/埋伏
+- WAIT: 休息/等待/安静陪伴/趴着不动
+- OBSERVE: 主动盯着/看/注意某个具体目标
+- GIVE: 把某物品交给/递给某人或动物
 - UNKNOWN: 完全无法识别
 
 场景实体参考（识别时用这些中文名，不用转换ID）：
-- 人物：老奶奶、气球摊主、慢跑者
-- 动物：流浪猫、鸽子群、松鼠
-- 地点：长椅、草丛、喷泉、公园门口/入口、废弃角落、跑道
-- 物品：外套、钥匙扣、会员卡、手机
+- 人物：老奶奶、卖气球大爷、卖鱼大叔、面馆老板娘、张叔
+- 动物：松鼠、猫头鹰、刺猬/刺猬一家、阿黄/老猫
+- 地点：大树、草丛、喷泉、长椅、小路、老橡树、空地、树根窝、存粮处、鱼摊、菜摊、面馆、推车、铁门、房间、门口
+- 物品：松果
 
 只返回JSON，不带markdown，格式：
 {"intent": "SNIFF", "entities": {"target": "长椅", "location": ""}, "confidence": 0.92}
@@ -66,15 +66,12 @@ class NLUResult:
 
 
 class BaseNLU(ABC):
-    """意图识别抽象基类——后期替换本地模型实现此接口即可"""
-
     @abstractmethod
     def classify(self, text: str, scene_context: str = "") -> NLUResult:
         pass
 
 
 class DeepSeekNLU(BaseNLU):
-    """基于 DeepSeek API 的意图识别"""
 
     def __init__(self):
         kwargs = {
@@ -112,21 +109,3 @@ class DeepSeekNLU(BaseNLU):
         except Exception as e:
             print(f"[NLU Error] {e}")
             return NLUResult(intent="UNKNOWN", entities={}, confidence=0.0, raw_text=text)
-
-
-# ============================================================
-# 预留：本地模型接口（后期替换时取消注释）
-# ============================================================
-# class LocalNLU(BaseNLU):
-#     def __init__(self, model_path: str):
-#         from transformers import pipeline
-#         self.pipe = pipeline("text-classification", model=model_path)
-#
-#     def classify(self, text: str, scene_context: str = "") -> NLUResult:
-#         result = self.pipe(text)[0]
-#         return NLUResult(
-#             intent=result["label"].upper(),
-#             entities={},
-#             confidence=result["score"],
-#             raw_text=text,
-#         )

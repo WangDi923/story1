@@ -1,73 +1,73 @@
 """
 Memory 管理模块
 ===============
-三层 memory 结构统一覆盖 NPC 和小动物。
-标签策略：规则自动打标 + 接口预留 AI 兜底。
+新版：主线好感度驱动，场景2 NPC 挂在主线NPC下。
 """
 from typing import Dict, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from game_state import GameState
 
-NPC_RELEVANT = {
-    "grandma": ["grandma_bonded", "grandma_bond_progress", "direction_known", "clues", "phase"],
-    "vendor":  ["direction_known", "clues", "phase"],
-    "jogger":  ["jogger_warned", "jogger_danger", "danger_resolved", "rescue_failed",
-                "jogger_photo", "grandma_bonded", "phase"],
-    "cat":     ["cat_ally", "cat_approach_progress", "clues", "phase"],
-    "squirrel":["clues", "phase"],
-    "pigeons": ["jogger_warned", "phase"],
+from quests import get_quest_hint
+
+# 每个NPC属于哪条主线
+NPC_CONTEXT = {
+    # 公园NPC（各自是主线）
+    "squirrel":     {"mainline": "squirrel", "scene": "park"},
+    "grandma":      {"mainline": "grandma",  "scene": "park"},
+    "vendor":       {"mainline": "vendor",   "scene": "park"},
+    # 森林NPC（挂在松鼠主线）
+    "owl":          {"mainline": "squirrel", "scene": "forest"},
+    "hedgehog":     {"mainline": "squirrel", "scene": "forest"},
+    # 菜市场NPC（挂在老奶奶主线）
+    "fish_vendor":  {"mainline": "grandma",  "scene": "market"},
+    "noodle_lady":  {"mainline": "grandma",  "scene": "market"},
+    # 废墟NPC（挂在大爷主线）
+    "old_cat":      {"mainline": "vendor",   "scene": "ruins"},
+    "zhang":        {"mainline": "vendor",   "scene": "ruins"},
 }
 
 
 def build_state_summary(npc_name: str, state: "GameState") -> str:
-    from game_state import CLUE_META
-    relevant = NPC_RELEVANT.get(npc_name, [])
+    """构建注入NPC prompt的状态摘要"""
+    ctx = NPC_CONTEXT.get(npc_name)
+    if not ctx:
+        return "• 无特别相关状态。"
+
+    mainline = ctx["mainline"]
+    affinity = state.npc_affinity.get(mainline, 0)
     lines = []
 
-    if "grandma_bonded" in relevant:
-        if state.flag_grandma_bonded:
-            lines.append("• 小饼已经和你建立了亲近关系，你愿意分享你看到的信息。")
-        else:
-            lines.append(f"• 小饼还没完全赢得你的信任（进度{state.grandma_bond_progress}/2），"
-                         f"不要主动提起年轻男生的事。")
+    # 1. 好感度描述（影响NPC语气和态度）
+    if affinity >= 60:
+        lines.append("• 小饼和你（们）关系很好，你对它非常友善和信任。")
+    elif affinity >= 40:
+        lines.append("• 小饼给你留下了不错的印象，你挺喜欢它的。")
+    elif affinity >= 25:
+        lines.append("• 小饼表现还行，你对它有好感但还在观察。")
+    elif affinity >= 10:
+        lines.append("• 小饼刚认识你不久，你对它态度一般。")
+    else:
+        lines.append("• 你对小饼不太信任，甚至有点不高兴。")
 
-    if "direction_known" in relevant and state.flag_direction_known:
-        lines.append("• 小饼已经知道主人去了全家便利店。")
+    # 2. 任务上下文（场景2 NPC 用自己的提示）
+    hint = get_quest_hint(mainline, state, npc_name=npc_name)
+    if hint:
+        lines.append(f"• {hint}")
 
-    if "clues" in relevant and state.clues_found:
-        clue_names = [CLUE_META.get(c, c) for c in state.clues_found]
-        lines.append(f"• 小饼目前已发现的线索：{', '.join(clue_names)}")
+    # 3. 背包信息（仅对需要物品的NPC）
+    if npc_name == "squirrel":
+        quest_step = state.npc_quest_step.get("squirrel", 0)
+        if quest_step == 2:
+            lines.append("• 小饼还没找到松果。")
 
-    if "phase" in relevant:
-        phase_text = {
-            1: "傍晚，公园人还比较多。",
-            2: "天色渐暗，人开始少了。",
-            3: "天快黑了，你要准备离开了。"
-        }
-        lines.append(f"• 当前时间：{phase_text.get(state.phase, '')}")
-
-    if "jogger_warned" in relevant and state.flag_jogger_warned:
-        lines.append("• 你之前已经被小饼惊到过一次，有些不耐烦。")
-
-    if "jogger_danger" in relevant and state.flag_jogger_danger:
-        lines.append("• 你正在生气，已经准备打电话叫人。")
-
-    if "danger_resolved" in relevant and state.flag_danger_resolved:
-        lines.append("• 小饼刚刚让你消了气，你现在对它态度好了一些。")
-
-    if "jogger_photo" in relevant:
-        if state.flag_danger_resolved and not state.flag_jogger_photo_revealed:
-            lines.append("• 你手机里有一张刚才拍的公园照片，背景里有个年轻男生。"
-                         "如果小饼对你友好，可以拿出来给它看。")
-        elif state.flag_jogger_photo_revealed:
-            lines.append("• 你已经把手机里的照片展示给小饼看过了。")
-
-    if "cat_ally" in relevant:
-        if state.flag_cat_ally:
-            lines.append("• 小饼已经和你建立了信任，你们是朋友。")
-        else:
-            lines.append(f"• 小饼还没完全赢得你的信任（进度{state.cat_approach_progress}/1），保持警惕。")
+    # 4. 场景轮数
+    from game_state import SCENE_META
+    scene_meta = SCENE_META.get(state.current_scene, {})
+    max_turns = scene_meta.get("max_turns", 20)
+    remaining = max(0, max_turns - state.scene_turn_count)
+    if remaining <= 3 and state.current_scene == "park":
+        lines.append(f"• 天快黑了，时间不多了（剩{remaining}轮）。")
 
     if not lines:
         lines.append("• 无特别相关状态。")

@@ -1,17 +1,15 @@
 """
 StoryWeaver Gradio UI
 =====================
-修复：
-  1. 退出对话按钮正确显示/隐藏（使用 gr.update）
-  2. 场景面板合并 NPC 与小动物
-  3. 输出列表统一，消除 dlg_text/dlg_visible 混乱
+全新版本：场景动态切换 + 好感度面板 + 任务追踪
 """
 import gradio as gr
 from typing import List, Tuple, Any
 
-from game_state import GameState, CLUE_META, ENDING_META, PHASE_DESC
+from game_state import GameState, ENDING_META, SCENE_META, NPC_SCENE2_THRESHOLD
 from engine import new_game, process_turn, get_suggestions, OPENING_NARRATION
 from nlg import NPC_DISPLAY
+from quests import get_quest_display
 import logger as glogger
 
 
@@ -20,58 +18,87 @@ import logger as glogger
 # =====================================================
 
 def render_scene_panel(state: GameState) -> str:
-    phase_name, _ = PHASE_DESC.get(state.phase, ("傍晚", ""))
-    lines = [f"## 📍 城市公园 · {phase_name}", ""]
+    scene = SCENE_META.get(state.current_scene, {})
+    scene_name = scene.get("name", state.current_scene)
+    lines = [f"## 📍 {scene_name}", ""]
 
+    # 可互动角色
+    npc_ids = list(scene.get("npcs", []))
+    mainline = state.get_mainline_npc()
+    if mainline and mainline not in npc_ids:
+        npc_ids.insert(0, mainline)
+    npc_names = [f"【{NPC_DISPLAY.get(n, n)}】" for n in npc_ids]
     lines.append("**可互动角色**")
-    lines.append("【老奶奶】  【气球摊主】  【慢跑者】")
-    lines.append("【流浪猫小灰】  【松鼠】  【鸽子群】")
+    lines.append("  ".join(npc_names))
     lines.append("")
-    lines.append("**可探索地点**")
-    lines.append("【长椅】  【草丛】  【喷泉】  【公园入口】  【废弃角落】")
 
-    lines.append("")
+    # 可探索地点
+    loc_names = {
+        "tree": "大树", "bushes": "草丛", "fountain": "喷泉",
+        "bench": "长椅", "path": "小路",
+        "oak_tree": "老橡树", "clearing": "空地",
+        "burrow": "树根窝", "stash": "存粮处",
+        "fish_stall": "鱼摊", "veggie_stall": "菜摊",
+        "noodle_shop": "面馆", "cart": "推车",
+        "iron_gate": "铁门", "room": "房间", "doorstep": "门口",
+    }
+    locations = [f"【{loc_names.get(l, l)}】" for l in scene.get("locations", [])]
+    if locations:
+        lines.append("**可探索地点**")
+        lines.append("  ".join(locations))
+        lines.append("")
+
+    # 时间进度
     lines.append("---")
-    turn = state.turn_count
-    total = 20
-    filled = min(turn, total)
-    bar = "█" * filled + "░" * (total - filled)
-    phase_arrow = "🌅 傍晚"
-    if state.phase >= 2:
-        phase_arrow += " → 🌆 黄昏"
-    if state.phase >= 3:
-        phase_arrow += " → 🌃 入夜"
-    lines.append(f"**🕐 时间进度**")
+    max_turns = scene.get("max_turns", 20)
+    turn = min(state.scene_turn_count, max_turns)
+    filled = int(turn / max_turns * 20)
+    bar = "█" * filled + "░" * (20 - filled)
+    lines.append(f"**🕐 时间进度** ({turn}/{max_turns})")
     lines.append(f"`{bar}`")
-    lines.append(phase_arrow)
 
     return "\n".join(lines)
 
 
-def render_clue_panel(state: GameState) -> str:
-    lines = ["## 🔍 线索栏", ""]
-    if not state.clues_found:
-        lines.append("💭 小饼东张西望，还没找到任何有用的线索……")
-    else:
-        for clue_id in state.clues_found:
-            desc = CLUE_META.get(clue_id, clue_id)
-            lines.append(f"✅ {desc}")
-        if not state.game_over:
-            n = len(state.clues_found)
-            lines.append("")
-            if state.flag_direction_known and n >= 3:
-                lines.append("💭 小饼感觉自己已经知道该去哪里了！")
-            elif n >= 2:
-                lines.append("💭 小饼感觉方向越来越清晰了……")
+def render_affinity_panel(state: GameState) -> str:
+    lines = ["## 💛 好感度", ""]
+
+    npc_names = {"squirrel": "小松鼠", "grandma": "老奶奶", "vendor": "大爷"}
+
+    for npc, display in npc_names.items():
+        aff = state.npc_affinity.get(npc, 0)
+        filled = int(aff / 100 * 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        threshold = NPC_SCENE2_THRESHOLD.get(npc, 0)
+        marker = " ✅" if aff >= threshold else ""
+        lines.append(f"**{display}**: `{bar}` {aff}/100{marker}")
+
+    return "\n".join(lines)
+
+
+def render_quest_panel(state: GameState) -> str:
+    lines = ["## 📋 任务", ""]
+
+    npc_names = {"squirrel": "🐿️ 松鼠", "grandma": "👵 老奶奶", "vendor": "🎈 大爷"}
+
+    for npc, display in npc_names.items():
+        quest_desc = get_quest_display(npc, state)
+        step = state.npc_quest_step.get(npc, 0)
+        if quest_desc:
+            if step > 0:
+                lines.append(f"🟡 {display}：{quest_desc}")
             else:
-                lines.append("💭 小饼觉得线索还不够，公园里一定还藏着什么……")
+                lines.append(f"⬜ {display}：{quest_desc}")
+        else:
+            lines.append(f"✅ {display}：已完成")
+
     return "\n".join(lines)
 
 
 def render_ending_panel(state: GameState) -> str:
     if not state.game_over or not state.ending:
         return ""
-    lines = ["## 🎮 已解锁结局", ""]
+    lines = ["## 🎮 结局", ""]
     for eid, ename in ENDING_META.items():
         if eid == state.ending:
             lines.append(f"✅ **{ename}**")
@@ -83,11 +110,10 @@ def render_ending_panel(state: GameState) -> str:
 
 
 # =====================================================
-# 对话状态栏（返回 gr.update 对象）
+# 对话状态栏
 # =====================================================
 
 def dialogue_updates(state: GameState):
-    """返回 (dialogue_status update, exit_btn update)"""
     if state.in_dialogue and state.dialogue_target:
         display = NPC_DISPLAY.get(state.dialogue_target, state.dialogue_target)
         text = f"💬 正在和 【{display}】 对话中"
@@ -113,7 +139,8 @@ def on_start():
     return (
         chat, state, logs,
         render_scene_panel(state),
-        render_clue_panel(state),
+        render_affinity_panel(state),
+        render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
         *_btn_updates(suggestions),
@@ -131,10 +158,11 @@ def on_submit(player_input: str, chat: list, state: GameState, logs: list):
 
     dlg_status, exit_visible = dialogue_updates(state)
     return (
-        "",                              # clear input box
+        "",
         chat, state, logs,
         render_scene_panel(state),
-        render_clue_panel(state),
+        render_affinity_panel(state),
+        render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
         glogger.format_log_for_display(logs),
@@ -161,7 +189,8 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
         "",
         chat, state, logs,
         render_scene_panel(state),
-        render_clue_panel(state),
+        render_affinity_panel(state),
+        render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
         glogger.format_log_for_display(logs),
@@ -175,13 +204,13 @@ def _btn_updates(suggestions: List[str]):
 
 
 def _unchanged(chat, state, logs):
-    """输入为空时什么都不变，返回同样结构"""
     suggestions = get_suggestions(state)
     dlg_status, exit_visible = dialogue_updates(state)
     return (
         chat, state, logs,
         render_scene_panel(state),
-        render_clue_panel(state),
+        render_affinity_panel(state),
+        render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
         glogger.format_log_for_display(logs),
@@ -215,8 +244,7 @@ def build_ui():
         log_data   = gr.State([])
 
         gr.Markdown("# 🐾 寻家记：小饼的城市冒险")
-        gr.Markdown("*你是柴犬小饼，在城市公园和主人小明走散了。"
-                    "靠嗅觉和机智找到回家的路！*")
+        gr.Markdown("*你是流浪小狗小饼。在城市的角落里，也许能找到一个属于你的家。*")
         gr.Markdown("---")
 
         with gr.Tabs():
@@ -233,7 +261,6 @@ def build_ui():
                             bubble_full_width=False,
                         )
 
-                        # 对话状态栏
                         dialogue_status = gr.Markdown(
                             value="",
                             elem_id="dialogue-bar",
@@ -246,10 +273,9 @@ def build_ui():
                             visible=False,
                         )
 
-                        # 输入行
                         with gr.Row():
                             input_box = gr.Textbox(
-                                placeholder="告诉小饼做什么，例如：闻闻那张长椅 / 慢慢走向老奶奶",
+                                placeholder="告诉小饼做什么，例如：走向松鼠 / 闻闻草丛 / 把松果给它",
                                 label="",
                                 lines=1,
                                 scale=5,
@@ -257,7 +283,6 @@ def build_ui():
                             )
                             send_btn = gr.Button("发送 →", variant="primary", scale=1)
 
-                        # 建议选项
                         with gr.Row():
                             btn0 = gr.Button("", variant="secondary", visible=False, size="sm")
                             btn1 = gr.Button("", variant="secondary", visible=False, size="sm")
@@ -266,10 +291,11 @@ def build_ui():
 
                     # ===== 右栏 =====
                     with gr.Column(scale=2):
-                        scene_panel  = gr.Markdown("点击「开始游戏」")
-                        clue_panel   = gr.Markdown("")
-                        ending_panel = gr.Markdown("")
-                        restart_btn  = gr.Button("🔄 重新开始", variant="secondary")
+                        scene_panel    = gr.Markdown("点击「开始游戏」")
+                        affinity_panel = gr.Markdown("")
+                        quest_panel    = gr.Markdown("")
+                        ending_panel   = gr.Markdown("")
+                        restart_btn    = gr.Button("🔄 重新开始", variant="secondary")
 
             # =================== 日志页 ===================
             with gr.Tab("📋 日志"):
@@ -285,22 +311,16 @@ def build_ui():
                 )
 
         # ===== 统一输出结构 =====
-        # 所有事件函数输出顺序：
-        # ("" input_clear,) chat, state, logs,
-        # scene, clues, dlg_status, exit_btn,
-        # ending, log_display, btn0~3
-
         core_outputs = [
             chatbot, game_state, log_data,
-            scene_panel, clue_panel,
+            scene_panel, affinity_panel, quest_panel,
             dialogue_status, exit_btn,
             ending_panel,
         ]
         submit_outputs = core_outputs + [log_display, btn0, btn1, btn2, btn3]
-        start_outputs  = core_outputs + [btn0, btn1, btn2, btn3]  # no log_display update
+        start_outputs  = core_outputs + [btn0, btn1, btn2, btn3]
 
         # ===== 事件绑定 =====
-
         restart_btn.click(fn=on_start, outputs=start_outputs)
 
         send_btn.click(

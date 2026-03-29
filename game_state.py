@@ -1,54 +1,185 @@
 """
 游戏状态管理
 ============
-小动物和 NPC 统一处理，均可进入对话模式。
+流浪小狗小饼的冒险：三条主线 × 双场景 × 好感度系统
 """
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 
-CLUE_META = {
-    "bench_scent":      "长椅上的气味——小明不久前在这里待过",
-    "key_holder":       "草丛里的钥匙扣——小明走得很急",
-    "grandma_witness":  "老奶奶目击——小明跑向公园对面的全家便利店",
-    "vendor_memory":    "摊主的记忆——有人跑向公园门口方向",
-    "cat_outfit_card":  "小明的外套和全家会员卡（门店：公园正门对面38号）",
-    "jogger_photo":     "🌟慢跑者手机里的照片——拍到了小明的背影（彩蛋）",
+
+# =====================================================
+# 场景元数据
+# =====================================================
+
+SCENE_META = {
+    "park": {
+        "name": "城市公园",
+        "max_turns": 10,
+        "npcs": ["squirrel", "grandma", "vendor"],
+        "locations": ["tree", "bushes", "fountain", "bench", "path"],
+    },
+    "forest": {
+        "name": "城郊森林",
+        "max_turns": 12,
+        "npcs": ["owl", "hedgehog"],
+        "locations": ["oak_tree", "clearing", "burrow", "stash"],
+    },
+    "market": {
+        "name": "菜市场",
+        "max_turns": 12,
+        "npcs": ["fish_vendor", "noodle_lady"],
+        "locations": ["fish_stall", "veggie_stall", "noodle_shop", "cart"],
+    },
+    "ruins": {
+        "name": "废墟之家",
+        "max_turns": 12,
+        "npcs": ["old_cat", "zhang"],
+        "locations": ["iron_gate", "room", "doorstep"],
+    },
 }
 
-PHASE_DESC = {
-    1: ("🌅 傍晚", "公园里还有不少人，阳光斜斜地打在石板路上。"),
-    2: ("🌆 黄昏", "路灯开始亮起，公园里的人少了许多。"),
-    3: ("🌃 入夜", "公园的灯全亮了，夜风带着凉意。"),
+# 场景2对应的主线NPC（进入该场景时跟随的NPC）
+SCENE_MAINLINE = {
+    "park": None,
+    "forest": "squirrel",
+    "market": "grandma",
+    "ruins": "vendor",
 }
+
+# 公园NPC → 对应场景2
+NPC_NEXT_SCENE = {
+    "squirrel": "forest",
+    "grandma": "market",
+    "vendor": "ruins",
+}
+
+# 公园NPC进入场景2的好感阈值
+NPC_SCENE2_THRESHOLD = {
+    "squirrel": 40,
+    "grandma": 30,
+    "vendor": 40,
+}
+
+# 场景2搞砸阈值（好感低于此 → 流浪结局）
+SCENE2_FAIL_THRESHOLD = {
+    "forest": 20,
+    "market": 15,
+    "ruins": 20,
+}
+
+
+# =====================================================
+# 好感度行为映射
+# =====================================================
+
+AFFINITY_ACTIONS: Dict[tuple, int] = {
+    # === 公园 - 松鼠 ===
+    ("squirrel", "approach"):       +10,
+    ("squirrel", "dialogue"):       +5,
+    ("squirrel", "give_pine_nuts"): +30,
+    ("squirrel", "bark_at"):        -15,
+
+    # === 公园 - 老奶奶 ===
+    ("grandma", "approach"):        +10,
+    ("grandma", "listen_story"):    +15,
+    ("grandma", "eat_snack"):       +15,
+    ("grandma", "bite_pants"):      -20,
+    ("grandma", "bark_at"):         -20,
+
+    # === 公园 - 卖气球大爷 ===
+    ("vendor", "approach"):         +15,
+    ("vendor", "dialogue"):         +10,
+    ("vendor", "help_sell"):        +25,
+    ("vendor", "sell_success"):     +15,
+    ("vendor", "pop_balloon"):      -15,
+
+    # === 森林（挂在松鼠主线下） ===
+    ("squirrel", "owl_dialogue"):       +5,
+    ("squirrel", "visit_hedgehog"):     +5,
+    ("squirrel", "chase_wildcat"):      +20,
+    ("squirrel", "bark_owl"):           -15,
+    ("squirrel", "steal_stash"):        -25,
+    ("squirrel", "abandon_guard"):      -20,
+
+    # === 菜市场（挂在老奶奶主线下） ===
+    ("grandma", "meet_fish_vendor"):    +5,
+    ("grandma", "guard_cart"):          +15,
+    ("grandma", "visit_noodle_shop"):   +10,
+    ("grandma", "rampage_stall"):       -15,
+    ("grandma", "steal_fish"):          -20,
+    ("grandma", "abandon_cart"):        -20,
+    ("grandma", "bark_passerby"):       -15,
+
+    # === 废墟（挂在大爷主线下） ===
+    ("vendor", "befriend_cat"):     +10,
+    ("vendor", "zhang_visit"):      +10,
+    ("vendor", "night_company"):    +10,
+    ("vendor", "bully_cat"):        -20,
+    ("vendor", "destroy_stuff"):    -15,
+    ("vendor", "bark_zhang"):       -15,
+    ("vendor", "restless_night"):   -10,
+}
+
+
+# =====================================================
+# 结局
+# =====================================================
 
 ENDING_META = {
-    "happy":           "🎉 圆满结局",
-    "solo":            "🌙 独自出走结局",
-    "adopted_grandma": "🏠 被老奶奶收养结局",
-    "adopted_cat":     "🐱 跟流浪猫留下结局",
-    "stray":           "🌌 流浪结局",
-    "bad":             "💀 坏结局",
+    "forest_home":  "🌲 森林之家",
+    "grandma_home": "🏠 奶奶的家",
+    "ruins_home":   "🎈 废墟里的家",
+    "stray":        "🌙 流浪",
 }
 
-# 所有可对话角色
-ALL_NPCS = ["grandma", "vendor", "jogger", "cat", "squirrel", "pigeons"]
+
+# =====================================================
+# 实体映射
+# =====================================================
+
+ALL_NPCS = [
+    "squirrel", "grandma", "vendor",          # 公园
+    "owl", "hedgehog",                         # 森林
+    "fish_vendor", "noodle_lady",              # 菜市场
+    "old_cat", "zhang",                        # 废墟
+]
 
 ENTITY_MAP = {
-    "grandma":         ["老奶奶", "奶奶", "老太太", "老人家", "老人"],
-    "vendor":          ["摊主", "气球摊主", "卖气球的", "卖气球"],
-    "jogger":          ["慢跑者", "跑步的", "跑步的人", "戴耳机的"],
-    "cat":             ["流浪猫", "猫", "小灰", "猫咪", "橘猫", "花猫"],
-    "squirrel":        ["松鼠"],
-    "pigeons":         ["鸽子", "鸽子群", "一群鸽子", "鸽子们"],
-    "bench":           ["长椅", "椅子", "木椅", "长凳"],
-    "bushes":          ["草丛", "灌木", "草地", "草"],
-    "fountain":        ["喷泉", "水池"],
-    "entrance":        ["公园门口", "公园入口", "大门", "门口", "全家", "便利店", "出口"],
-    "corner":          ["废弃角落", "角落", "纸箱", "废弃的角落"],
-    "track":           ["跑道", "跑步道"],
-    "outfit":          ["外套", "衣服", "大衣"],
-    "key_holder":      ["钥匙扣", "钥匙"],
-    "membership_card": ["会员卡", "卡片", "小卡片"],
+    # 公园NPC
+    "squirrel":     ["松鼠", "小松鼠"],
+    "grandma":      ["老奶奶", "奶奶", "老太太", "老人家"],
+    "vendor":       ["大爷", "卖气球的", "卖气球大爷", "气球大爷", "老大爷"],
+    # 森林NPC
+    "owl":          ["猫头鹰", "夜猫子"],
+    "hedgehog":     ["刺猬", "刺猬一家", "刺猬妈妈"],
+    # 菜市场NPC
+    "fish_vendor":  ["卖鱼的", "卖鱼大叔", "大叔", "鱼贩"],
+    "noodle_lady":  ["老板娘", "面馆老板娘", "面馆"],
+    # 废墟NPC
+    "old_cat":      ["阿黄", "老猫", "猫", "猫咪"],
+    "zhang":        ["张叔", "收废品的", "邻居"],
+    # 公园地点
+    "tree":         ["大树", "树", "树下"],
+    "bushes":       ["草丛", "灌木", "草地"],
+    "fountain":     ["喷泉", "水池"],
+    "bench":        ["长椅", "椅子", "凳子"],
+    "path":         ["小路", "路", "公园小路"],
+    # 森林地点
+    "oak_tree":     ["老橡树", "橡树", "大橡树"],
+    "clearing":     ["空地", "林间空地"],
+    "burrow":       ["树根窝", "树根", "刺猬窝", "窝"],
+    "stash":        ["存粮处", "存粮", "蘑菇堆", "洞口"],
+    # 菜市场地点
+    "fish_stall":   ["鱼摊", "鱼"],
+    "veggie_stall": ["菜摊", "蔬菜摊"],
+    "noodle_shop":  ["面馆", "面店"],
+    "cart":         ["推车", "小推车"],
+    # 废墟地点
+    "iron_gate":    ["铁门", "大门", "门"],
+    "room":         ["房间", "屋里", "大爷的房间"],
+    "doorstep":     ["门口", "门前"],
+    # 物品
+    "pine_nuts":    ["松果", "松子"],
 }
 
 
@@ -61,86 +192,97 @@ def normalize_entity(raw: str) -> str:
     return raw
 
 
+# =====================================================
+# 游戏状态
+# =====================================================
+
 @dataclass
 class GameState:
-    turn_count: int = 0
-    phase: int = 1
+    # 场景
+    current_scene: str = "park"
+    scene_turn_count: int = 0
+    total_turn_count: int = 0
 
-    # 关系 flag
-    grandma_bond_progress: int = 0
-    flag_grandma_bonded: bool = False
-    cat_approach_progress: int = 0
-    flag_cat_ally: bool = False
+    # 好感度（0-100，只有三个主线NPC有好感度）
+    npc_affinity: Dict[str, int] = field(default_factory=lambda: {
+        "squirrel": 0,
+        "grandma": 0,
+        "vendor": 0,
+    })
 
-    # 危险 flag
-    flag_jogger_warned: bool = False
-    flag_jogger_danger: bool = False
-    flag_danger_resolved: bool = False
-    flag_rescue_failed: bool = False
+    # 任务进度（每个主线NPC的当前步骤）
+    npc_quest_step: Dict[str, int] = field(default_factory=lambda: {
+        "squirrel": 0,
+        "grandma": 0,
+        "vendor": 0,
+    })
 
-    # 剧情 flag
-    flag_direction_known: bool = False
-    flag_jogger_photo_revealed: bool = False
-    flag_night_transition_shown: bool = False  # 入夜过渡叙事已显示
+    # 背包
+    inventory: List[str] = field(default_factory=list)
 
-    # 线索
-    clues_found: List[str] = field(default_factory=list)
-    has_membership_card: bool = False
+    # 探索记录（按场景分区）
+    explored: Dict[str, Dict[str, int]] = field(
+        default_factory=lambda: {"park": {}, "forest": {}, "market": {}, "ruins": {}}
+    )
 
-    # 探索记录
-    explored: Dict[str, int] = field(default_factory=dict)
-
-    # 对话状态（所有角色统一）
+    # 对话状态
     in_dialogue: bool = False
     dialogue_target: Optional[str] = None
 
     # 观察状态
     observe_target: Optional[str] = None
 
-    # NPC & 动物对话历史（统一管理）
+    # NPC 对话历史
     npc_memories: Dict[str, List[Dict[str, str]]] = field(default_factory=lambda: {
-        "grandma":  [],
-        "vendor":   [],
-        "jogger":   [],
-        "cat":      [],
-        "squirrel": [],
-        "pigeons":  [],
+        npc: [] for npc in ALL_NPCS
     })
 
+    # 结局
     game_over: bool = False
     ending: Optional[str] = None
+
+    # 日志
     last_nlu_log: Dict[str, Any] = field(default_factory=dict)
 
-    def add_clue(self, clue_id: str) -> bool:
-        if clue_id not in self.clues_found:
-            self.clues_found.append(clue_id)
-            return True
-        return False
+    # ---------- 辅助方法 ----------
+
+    def adjust_affinity(self, npc: str, action_tag: str) -> int:
+        """调整好感度，返回变化量"""
+        delta = AFFINITY_ACTIONS.get((npc, action_tag), 0)
+        if delta == 0:
+            return 0
+        old = self.npc_affinity.get(npc, 0)
+        self.npc_affinity[npc] = max(0, min(100, old + delta))
+        return delta
+
+    def get_mainline_npc(self) -> Optional[str]:
+        """当前场景的主线NPC"""
+        return SCENE_MAINLINE.get(self.current_scene)
+
+    def get_mainline_affinity(self) -> int:
+        """当前场景主线好感度"""
+        npc = self.get_mainline_npc()
+        if npc:
+            return self.npc_affinity.get(npc, 0)
+        return 0
 
     def mark_explored(self, entity: str):
-        self.explored[entity] = self.explored.get(entity, 0) + 1
+        scene = self.current_scene
+        self.explored[scene][entity] = self.explored[scene].get(entity, 0) + 1
 
     def is_explored(self, entity: str) -> bool:
-        return self.explored.get(entity, 0) > 0
+        scene = self.current_scene
+        return self.explored.get(scene, {}).get(entity, 0) > 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "turn": self.turn_count,
-            "phase": self.phase,
-            "flags": {
-                "grandma_bonded": self.flag_grandma_bonded,
-                "cat_ally": self.flag_cat_ally,
-                "jogger_warned": self.flag_jogger_warned,
-                "jogger_danger": self.flag_jogger_danger,
-                "danger_resolved": self.flag_danger_resolved,
-                "rescue_failed": self.flag_rescue_failed,
-                "direction_known": self.flag_direction_known,
-                "jogger_photo": self.flag_jogger_photo_revealed,
-                "night_transition": self.flag_night_transition_shown,
-            },
-            "clues": self.clues_found,
-            "has_membership_card": self.has_membership_card,
-            "explored": self.explored,
+            "scene": self.current_scene,
+            "scene_turn": self.scene_turn_count,
+            "total_turn": self.total_turn_count,
+            "affinity": dict(self.npc_affinity),
+            "quest_step": dict(self.npc_quest_step),
+            "inventory": list(self.inventory),
+            "explored": {k: dict(v) for k, v in self.explored.items()},
             "in_dialogue": self.in_dialogue,
             "dialogue_target": self.dialogue_target,
             "game_over": self.game_over,

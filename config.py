@@ -15,8 +15,6 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL    = "deepseek-chat"
 
 # ===== 游戏节奏 =====
-PHASE_1_END = 10    # 第1~10轮：傍晚
-PHASE_2_END = 18    # 第11~18轮：黄昏；第19轮起：入夜
 NLU_CONFIDENCE_THRESHOLD = 0.35
 
 # ===== 日志 =====
