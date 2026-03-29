@@ -2,7 +2,7 @@
 title: "寻家记：小饼的城市冒险"
 emoji: 🐾
 colorFrom: yellow
-colorTo: orange
+colorTo: yellow
 sdk: gradio
 sdk_version: 4.44.1
 python_version: '3.8'
