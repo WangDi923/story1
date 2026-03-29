@@ -4,7 +4,8 @@ emoji: 🐾
 colorFrom: yellow
 colorTo: orange
 sdk: gradio
-sdk_version: "4.44.1"
+sdk_version: 4.44.1
+python_version: '3.8'
 app_file: app.py
 pinned: false
 ---
