@@ -6,12 +6,45 @@ StoryWeaver Gradio UI
 import gradio as gr
 from typing import List, Tuple, Any
 import os
+import inspect
 
 from game_state import GameState, ENDING_META, SCENE_META, NPC_SCENE2_THRESHOLD
 from engine import new_game, process_turn, get_suggestions, OPENING_NARRATION
 from nlg import NPC_DISPLAY
 from quests import get_quest_display
 import logger as glogger
+
+
+def _gradio_major_version() -> int:
+    try:
+        return int(str(gr.__version__).split(".")[0])
+    except Exception:
+        return 3
+
+
+_USE_MESSAGES_CHAT = _gradio_major_version() >= 4
+
+
+def _new_chat_with_opening() -> list:
+    if _USE_MESSAGES_CHAT:
+        return [{"role": "assistant", "content": OPENING_NARRATION}]
+    # Gradio 3 Chatbot expects list[tuple[user, bot]]
+    return [(None, OPENING_NARRATION)]
+
+
+def _chat_add_turn(chat: list, user_text: str, bot_text: str):
+    if _USE_MESSAGES_CHAT:
+        chat.append({"role": "user", "content": user_text})
+        chat.append({"role": "assistant", "content": bot_text})
+    else:
+        chat.append((user_text, bot_text))
+
+
+def _chat_add_assistant(chat: list, bot_text: str):
+    if _USE_MESSAGES_CHAT:
+        chat.append({"role": "assistant", "content": bot_text})
+    else:
+        chat.append((None, bot_text))
 
 
 # =====================================================
@@ -229,7 +262,7 @@ def dialogue_updates(state: GameState):
 
 def on_start():
     state, suggestions = new_game()
-    chat = [{"role": "assistant", "content": OPENING_NARRATION}]
+    chat = _new_chat_with_opening()
     logs = []
     dlg_status, exit_visible = dialogue_updates(state)
     bg_html = get_scene_background_html(state.current_scene)
@@ -252,8 +285,7 @@ def on_submit(player_input: str, chat: list, state: GameState, logs: list):
     response, state, suggestions, log_entry = process_turn(player_input.strip(), state)
     glogger.write_log(log_entry)
     logs.append(log_entry)
-    chat.append({"role": "user", "content": player_input})
-    chat.append({"role": "assistant", "content": response})
+    _chat_add_turn(chat, player_input, response)
 
     dlg_status, exit_visible = dialogue_updates(state)
     bg_html = get_scene_background_html(state.current_scene)
@@ -282,7 +314,7 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
         display = NPC_DISPLAY.get(state.dialogue_target, state.dialogue_target)
         state.in_dialogue = False
         state.dialogue_target = None
-        chat.append({"role": "assistant", "content": f"小饼向【{display}】点点头，转身走开了。"})
+        _chat_add_assistant(chat, f"小饼向【{display}】点点头，转身走开了。")
 
     suggestions = get_suggestions(state)
     dlg_status, exit_visible = dialogue_updates(state)
@@ -508,11 +540,14 @@ def build_ui():
 
                     # ===== 左栏 =====
                     with gr.Column(scale=3, elem_id="left-pane"):
-                        chatbot = gr.Chatbot(
-                            label="冒险故事",
-                            height=460,
-                            elem_id="story-chat",
-                        )
+                        chatbot_kwargs = {
+                            "label": "冒险故事",
+                            "height": 460,
+                            "elem_id": "story-chat",
+                        }
+                        if _USE_MESSAGES_CHAT:
+                            chatbot_kwargs["type"] = "messages"
+                        chatbot = gr.Chatbot(**chatbot_kwargs)
 
                         dialogue_status = gr.Markdown(
                             value="",
@@ -611,9 +646,12 @@ def build_ui():
 
 if __name__ == "__main__":
     ui = build_ui()
-    ui.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        allowed_paths=["/workspaces/story1/assets/scenes"],
-    )
+    launch_kwargs = {
+        "server_name": "0.0.0.0",
+        "server_port": 7860,
+        "share": False,
+    }
+    # Gradio 3.x does not support allowed_paths
+    if "allowed_paths" in inspect.signature(ui.launch).parameters:
+        launch_kwargs["allowed_paths"] = ["/workspaces/story1/assets/scenes"]
+    ui.launch(**launch_kwargs)
