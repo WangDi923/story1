@@ -87,10 +87,10 @@ AFFINITY_ACTIONS: Dict[tuple, int] = {
     ("grandma", "bark_at"):         -20,
 
     # === 公园 - 卖气球大爷 ===
-    ("vendor", "approach"):         +15,
-    ("vendor", "dialogue"):         +10,
-    ("vendor", "help_sell"):        +25,
-    ("vendor", "sell_success"):     +15,
+    ("vendor", "approach"):         +10,
+    ("vendor", "dialogue"):         +5,
+    ("vendor", "help_sell"):        +15,
+    ("vendor", "sell_success"):     +10,
     ("vendor", "pop_balloon"):      -15,
 
     # === 森林（挂在松鼠主线下） ===
@@ -111,8 +111,8 @@ AFFINITY_ACTIONS: Dict[tuple, int] = {
     ("grandma", "bark_passerby"):       -15,
 
     # === 废墟（挂在大爷主线下） ===
-    ("vendor", "befriend_cat"):     +10,
-    ("vendor", "zhang_visit"):      +10,
+    ("vendor", "befriend_cat"):     +5,
+    ("vendor", "zhang_visit"):      +5,
     ("vendor", "night_company"):    +10,
     ("vendor", "bully_cat"):        -20,
     ("vendor", "destroy_stuff"):    -15,

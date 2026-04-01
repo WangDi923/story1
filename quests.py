@@ -94,7 +94,16 @@ def check_quest_trigger(npc: str, trigger: str, state: "GameState") -> bool:
     if state.npc_affinity.get(npc, 0) < affinity_req:
         return False
     # 检查探索前置条件
-    for flag in quest.get("requires_explored", []):
+    requires_explored = quest.get("requires_explored", [])
+    if npc == "squirrel" and trigger == "chase_wildcat":
+        # 诊断日志
+        print(f"[DEBUG] check_quest_trigger: squirrel.chase_wildcat")
+        print(f"  - requires_explored: {requires_explored}")
+        for flag in requires_explored:
+            is_explored = state.is_explored(flag)
+            print(f"    - {flag}: {is_explored}")
+    
+    for flag in requires_explored:
         if not state.is_explored(flag):
             return False
     return True

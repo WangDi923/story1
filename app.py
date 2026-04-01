@@ -4,6 +4,7 @@ StoryWeaver Gradio UI
 全新版本：场景动态切换 + 好感度面板 + 任务追踪
 """
 import gradio as gr
+import os
 from typing import List, Tuple, Any
 
 from game_state import GameState, ENDING_META, SCENE_META, NPC_SCENE2_THRESHOLD
@@ -21,6 +22,22 @@ def render_scene_panel(state: GameState) -> str:
     scene = SCENE_META.get(state.current_scene, {})
     scene_name = scene.get("name", state.current_scene)
     lines = [f"## 📍 {scene_name}", ""]
+
+    def _segmented_bar_html(current: int, total: int, segments: int, bar_class: str) -> tuple[str, int]:
+        if total <= 0:
+            pct = 0
+            filled = 0
+        else:
+            ratio = max(0.0, min(1.0, current / total))
+            pct = int(ratio * 100)
+            filled = int(round(ratio * segments))
+
+        parts = [f"<span class='seg {'filled' if i < filled else 'empty'}'></span>" for i in range(segments)]
+        grouped = []
+        for i in range(0, segments, 4):
+            grouped.append("".join(parts[i:i + 4]))
+        html = f"<div class='segmented-progress {bar_class}'>" + "<span class='group-gap'></span>".join(grouped) + "</div>"
+        return html, pct
 
     # 可互动角色
     npc_ids = list(scene.get("npcs", []))
@@ -48,16 +65,88 @@ def render_scene_panel(state: GameState) -> str:
         lines.append("  ".join(locations))
         lines.append("")
 
-    # 时间进度
+    # 场景时间进度
     lines.append("---")
     max_turns = scene.get("max_turns", 20)
     turn = min(state.scene_turn_count, max_turns)
-    filled = int(turn / max_turns * 20)
-    bar = "█" * filled + "░" * (20 - filled)
-    lines.append(f"**🕐 时间进度** ({turn}/{max_turns})")
-    lines.append(f"`{bar}`")
+    scene_bar, scene_pct = _segmented_bar_html(turn, max_turns, segments=12, bar_class="scene-progress")
+    lines.append(f"**🕐 场景进度** ({turn}/{max_turns}) · {scene_pct}%")
+    lines.append(scene_bar)
+    lines.append("")
+
+    # 本局总进度（公园 + 场景2）
+    park_max = SCENE_META.get("park", {}).get("max_turns", 10)
+    non_park_max = [m.get("max_turns", 12) for s, m in SCENE_META.items() if s != "park"]
+    scene2_max = max(non_park_max) if non_park_max else 12
+    total_max = park_max + scene2_max
+    total_turn = min(state.total_turn_count, total_max)
+    total_bar, total_pct = _segmented_bar_html(total_turn, total_max, segments=16, bar_class="total-progress")
+    lines.append(f"**📈 总进度（本局）** ({total_turn}/{total_max}) · {total_pct}%")
+    lines.append(total_bar)
 
     return "\n".join(lines)
+
+
+def render_scene_skin(state: GameState) -> str:
+    """生成背景图片 CSS - 仅显示场景图片层"""
+    scene = state.current_scene
+    scene_image_files = {
+        "park": "assets/scenes/park.jpg",
+        "forest": "assets/scenes/forest.jpg",
+        "market": "assets/scenes/market.jpg",
+        "ruins": "assets/scenes/ruins.jpg",
+    }
+    
+    # 进度条颜色配置
+    scene_colors = {
+        "park": {"scene_fill": "#4f8a38", "scene_empty": "rgba(79, 138, 56, 0.18)", "total_fill": "#a66c2b", "total_empty": "rgba(166, 108, 43, 0.18)"},
+        "forest": {"scene_fill": "#3b6a44", "scene_empty": "rgba(59, 106, 68, 0.2)", "total_fill": "#6f7d43", "total_empty": "rgba(111, 125, 67, 0.2)"},
+        "market": {"scene_fill": "#c36a2a", "scene_empty": "rgba(195, 106, 42, 0.2)", "total_fill": "#a43f2e", "total_empty": "rgba(164, 63, 46, 0.2)"},
+        "ruins": {"scene_fill": "#7a5c45", "scene_empty": "rgba(122, 92, 69, 0.2)", "total_fill": "#6b4f40", "total_empty": "rgba(107, 79, 64, 0.2)"},
+    }
+    
+    colors = scene_colors.get(scene, scene_colors["park"])
+    image_file = scene_image_files.get(scene)
+    has_scene_image = bool(image_file and os.path.exists(image_file))
+    image_layer = f"url('/gradio_api/file={image_file}')" if has_scene_image else "none"
+
+    return f"""
+<style id=\"dynamic-scene-skin\">
+#story-chat {{
+    background-image: {image_layer};
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-attachment: scroll;
+    transition: background-image 0.35s ease;
+}}
+
+#story-chat .wrap {{
+    background: transparent !important;
+}}
+
+#story-chat .message {{
+    background: rgba(255, 248, 240, 0.9);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}}
+
+.segmented-progress.scene-progress .seg.filled {{
+    background: {colors['scene_fill']};
+}}
+
+.segmented-progress.scene-progress .seg.empty {{
+    background: {colors['scene_empty']};
+}}
+
+.segmented-progress.total-progress .seg.filled {{
+    background: {colors['total_fill']};
+}}
+
+.segmented-progress.total-progress .seg.empty {{
+    background: {colors['total_empty']};
+}}
+</style>
+""".strip()
 
 
 def render_affinity_panel(state: GameState) -> str:
@@ -133,12 +222,13 @@ def dialogue_updates(state: GameState):
 
 def on_start():
     state, suggestions = new_game()
-    chat = [(None, OPENING_NARRATION)]
+    chat = [{"role": "assistant", "content": OPENING_NARRATION}]
     logs = []
     dlg_status, exit_visible = dialogue_updates(state)
     return (
         chat, state, logs,
         render_scene_panel(state),
+        render_scene_skin(state),
         render_affinity_panel(state),
         render_quest_panel(state),
         dlg_status, exit_visible,
@@ -154,13 +244,15 @@ def on_submit(player_input: str, chat: list, state: GameState, logs: list):
     response, state, suggestions, log_entry = process_turn(player_input.strip(), state)
     glogger.write_log(log_entry)
     logs.append(log_entry)
-    chat.append((player_input, response))
+    chat.append({"role": "user", "content": player_input})
+    chat.append({"role": "assistant", "content": response})
 
     dlg_status, exit_visible = dialogue_updates(state)
     return (
         "",
         chat, state, logs,
         render_scene_panel(state),
+        render_scene_skin(state),
         render_affinity_panel(state),
         render_quest_panel(state),
         dlg_status, exit_visible,
@@ -181,7 +273,7 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
         display = NPC_DISPLAY.get(state.dialogue_target, state.dialogue_target)
         state.in_dialogue = False
         state.dialogue_target = None
-        chat.append((None, f"小饼向【{display}】点点头，转身走开了。"))
+        chat.append({"role": "assistant", "content": f"小饼向【{display}】点点头，转身走开了。"})
 
     suggestions = get_suggestions(state)
     dlg_status, exit_visible = dialogue_updates(state)
@@ -189,6 +281,7 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
         "",
         chat, state, logs,
         render_scene_panel(state),
+        render_scene_skin(state),
         render_affinity_panel(state),
         render_quest_panel(state),
         dlg_status, exit_visible,
@@ -209,6 +302,7 @@ def _unchanged(chat, state, logs):
     return (
         chat, state, logs,
         render_scene_panel(state),
+        render_scene_skin(state),
         render_affinity_panel(state),
         render_quest_panel(state),
         dlg_status, exit_visible,
@@ -227,15 +321,196 @@ def build_ui():
 
     with gr.Blocks(
         title="寻家记：小饼的城市冒险",
-        theme=gr.themes.Soft(),
+        theme=gr.themes.Soft(
+            primary_hue="amber",
+            neutral_hue="stone",
+            font=["ZCOOL XiaoWei", "Noto Serif SC", "serif"],
+        ),
         css="""
+        @import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;600;700&display=swap');
+
+        :root {
+            --sw-bg-1: #f6efe1;
+            --sw-bg-2: #e8d9b8;
+            --sw-ink: #2b2118;
+            --sw-card: rgba(255, 250, 238, 0.88);
+            --sw-border: rgba(84, 61, 38, 0.16);
+            --sw-accent: #a45a1b;
+            --sw-accent-soft: #f6d4a6;
+            --sw-shadow: 0 10px 28px rgba(48, 33, 18, 0.12);
+        }
+
+        .gradio-container {
+            background:
+                radial-gradient(circle at 8% 6%, rgba(255, 224, 170, 0.5), transparent 36%),
+                radial-gradient(circle at 92% 88%, rgba(178, 130, 80, 0.2), transparent 40%),
+                linear-gradient(145deg, var(--sw-bg-1) 0%, var(--sw-bg-2) 100%);
+            color: var(--sw-ink);
+        }
+
+        .gradio-container * {
+            font-family: "Noto Serif SC", serif;
+        }
+
+        #story-title h1 {
+            font-family: "ZCOOL XiaoWei", serif;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+
+        #story-subtitle {
+            color: rgba(43, 33, 24, 0.82);
+            margin-bottom: 8px;
+        }
+
+        #main-tabs {
+            background: rgba(255, 252, 245, 0.52);
+            border: 1px solid var(--sw-border);
+            border-radius: 16px;
+            padding: 8px;
+            box-shadow: var(--sw-shadow);
+            backdrop-filter: blur(3px);
+        }
+
+        #main-tabs .tab-nav {
+            gap: 8px;
+            border: none;
+            padding: 4px;
+        }
+
+        #main-tabs .tab-nav button {
+            border-radius: 12px;
+            border: 1px solid var(--sw-border);
+            background: rgba(255, 248, 233, 0.72);
+            color: var(--sw-ink);
+        }
+
+        #main-tabs .tab-nav button.selected {
+            background: linear-gradient(135deg, #d08239 0%, #b56b2a 100%);
+            color: #fffaf0;
+            border-color: rgba(129, 70, 22, 0.7);
+        }
+
+        #left-pane, #right-pane {
+            background: var(--sw-card);
+            border: 1px solid var(--sw-border);
+            border-radius: 16px;
+            padding: 14px;
+            box-shadow: var(--sw-shadow);
+            animation: riseIn 320ms ease-out;
+        }
+
+        #story-chat {
+            border-radius: 14px;
+            border: 1px solid rgba(120, 82, 50, 0.2);
+            overflow: hidden;
+        }
+
+        #story-chat .wrap {
+            background: linear-gradient(180deg, #fff8ea 0%, #fff2d9 100%);
+        }
+
         #dialogue-bar {
-            background: #f0f7ff;
-            border: 1px solid #a0c4ff;
-            border-radius: 8px;
-            padding: 6px 12px;
-            font-size: 0.9em;
-            margin-bottom: 4px;
+            background: linear-gradient(135deg, #ffe8bf 0%, #ffd89a 100%);
+            border: 1px solid rgba(160, 92, 28, 0.35);
+            border-radius: 10px;
+            padding: 7px 12px;
+            font-size: 0.92em;
+            margin-bottom: 6px;
+            color: #4d2d15;
+        }
+
+        #input-box textarea {
+            border-radius: 10px;
+            border: 1px solid rgba(120, 82, 50, 0.24);
+            background: #fffdf7;
+        }
+
+        #send-btn, #restart-btn {
+            border-radius: 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+
+        #suggestions-row .gr-button {
+            border-radius: 999px;
+            border: 1px solid rgba(133, 85, 39, 0.28);
+            background: rgba(255, 244, 219, 0.85);
+        }
+
+        .panel-card {
+            border-radius: 12px;
+            border: 1px solid var(--sw-border);
+            background: rgba(255, 249, 238, 0.92);
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            box-shadow: 0 5px 14px rgba(69, 44, 22, 0.08);
+        }
+
+        .segmented-progress {
+            display: flex;
+            align-items: center;
+            margin-top: 4px;
+            margin-bottom: 2px;
+            gap: 4px;
+        }
+
+        .segmented-progress .seg {
+            width: 10px;
+            height: 10px;
+            border-radius: 4px;
+            display: inline-block;
+            transition: background 0.35s ease;
+        }
+
+        .segmented-progress .group-gap {
+            width: 5px;
+            height: 1px;
+            display: inline-block;
+        }
+
+        @keyframes sceneShift {
+            from {
+                filter: saturate(0.85);
+                opacity: 0.85;
+            }
+            to {
+                filter: saturate(1);
+                opacity: 1;
+            }
+        }
+
+        #ending-panel {
+            border: 1px solid rgba(173, 99, 25, 0.38);
+            background: linear-gradient(150deg, #fff6e4 0%, #ffeac7 100%);
+        }
+
+        #log-box textarea {
+            background: #2e2218;
+            color: #fde7cb;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 209, 145, 0.24);
+            font-family: "Noto Serif SC", serif;
+        }
+
+        @keyframes riseIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 900px) {
+            #left-pane, #right-pane {
+                padding: 10px;
+            }
+            #story-chat {
+                min-height: 360px;
+            }
         }
         """
     ) as demo:
@@ -243,23 +518,24 @@ def build_ui():
         game_state = gr.State(GameState())
         log_data   = gr.State([])
 
-        gr.Markdown("# 🐾 寻家记：小饼的城市冒险")
-        gr.Markdown("*你是流浪小狗小饼。在城市的角落里，也许能找到一个属于你的家。*")
+        gr.Markdown("# 🐾 寻家记：小饼的城市冒险", elem_id="story-title")
+        gr.Markdown("*你是流浪小狗小饼。在城市的角落里，也许能找到一个属于你的家。*", elem_id="story-subtitle")
         gr.Markdown("---")
 
-        with gr.Tabs():
+        with gr.Tabs(elem_id="main-tabs"):
 
             # =================== 游戏主页 ===================
             with gr.Tab("🎮 游戏"):
                 with gr.Row():
 
                     # ===== 左栏 =====
-                    with gr.Column(scale=3):
+                    with gr.Column(scale=3, elem_id="left-pane"):
                         chatbot = gr.Chatbot(
                             label="冒险故事",
                             height=460,
-                            bubble_full_width=False,
+                            elem_id="story-chat",
                         )
+                        scene_skin = gr.HTML(value="")
 
                         dialogue_status = gr.Markdown(
                             value="",
@@ -280,22 +556,23 @@ def build_ui():
                                 lines=1,
                                 scale=5,
                                 show_label=False,
+                                elem_id="input-box",
                             )
-                            send_btn = gr.Button("发送 →", variant="primary", scale=1)
+                            send_btn = gr.Button("发送 →", variant="primary", scale=1, elem_id="send-btn")
 
-                        with gr.Row():
+                        with gr.Row(elem_id="suggestions-row"):
                             btn0 = gr.Button("", variant="secondary", visible=False, size="sm")
                             btn1 = gr.Button("", variant="secondary", visible=False, size="sm")
                             btn2 = gr.Button("", variant="secondary", visible=False, size="sm")
                             btn3 = gr.Button("", variant="secondary", visible=False, size="sm")
 
                     # ===== 右栏 =====
-                    with gr.Column(scale=2):
-                        scene_panel    = gr.Markdown("点击「开始游戏」")
-                        affinity_panel = gr.Markdown("")
-                        quest_panel    = gr.Markdown("")
-                        ending_panel   = gr.Markdown("")
-                        restart_btn    = gr.Button("🔄 重新开始", variant="secondary")
+                    with gr.Column(scale=2, elem_id="right-pane"):
+                        scene_panel    = gr.Markdown("点击「开始游戏」", elem_classes=["panel-card"])
+                        affinity_panel = gr.Markdown("", elem_classes=["panel-card"])
+                        quest_panel    = gr.Markdown("", elem_classes=["panel-card"])
+                        ending_panel   = gr.Markdown("", elem_classes=["panel-card"], elem_id="ending-panel")
+                        restart_btn    = gr.Button("🔄 重新开始", variant="secondary", elem_id="restart-btn")
 
             # =================== 日志页 ===================
             with gr.Tab("📋 日志"):
@@ -307,13 +584,13 @@ def build_ui():
                     lines=30,
                     max_lines=60,
                     interactive=False,
-                    show_copy_button=True,
+                    elem_id="log-box",
                 )
 
         # ===== 统一输出结构 =====
         core_outputs = [
             chatbot, game_state, log_data,
-            scene_panel, affinity_panel, quest_panel,
+            scene_panel, scene_skin, affinity_panel, quest_panel,
             dialogue_status, exit_btn,
             ending_panel,
         ]
@@ -354,4 +631,9 @@ def build_ui():
 
 if __name__ == "__main__":
     ui = build_ui()
-    ui.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    ui.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        allowed_paths=["assets"],
+    )
