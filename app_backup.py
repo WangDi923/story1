@@ -1,93 +1,16 @@
 """
 StoryWeaver Gradio UI
 =====================
-全新版本：场景动态切换 + 好感度面板 + 任务追踪 + 动态背景
+全新版本：场景动态切换 + 好感度面板 + 任务追踪
 """
 import gradio as gr
 from typing import List, Tuple, Any
-import os
 
 from game_state import GameState, ENDING_META, SCENE_META, NPC_SCENE2_THRESHOLD
 from engine import new_game, process_turn, get_suggestions, OPENING_NARRATION
 from nlg import NPC_DISPLAY
 from quests import get_quest_display
 import logger as glogger
-
-
-# =====================================================
-# 动态背景支持
-# =====================================================
-
-def get_scene_background_html(scene_name: str) -> str:
-    """根据场景返回背景图 HTML（包含 style 标签）"""
-    scene_map = {
-        "park": "park.jpg",
-        "forest": "forest.jpg",
-        "market": "market.jpg",
-        "ruins": "ruins.jpg",
-    }
-    img_file = scene_map.get(scene_name, "park.jpg")
-    img_path = f"/workspaces/story1/assets/scenes/{img_file}"
-    
-    # 检查文件是否存在
-    if not os.path.exists(img_path):
-        return ""
-    
-    # 使用 Gradio 文件路由，避免前端直连本地路径失败
-    relative_path = f"/gradio_api/file={img_path}"
-    html = f"""
-    <style id="scene-bg-style">
-    #story-chat {{
-        background-image: url('{relative_path}') !important;
-        background-size: cover !important;
-        background-position: center !important;
-        background-repeat: no-repeat !important;
-        border-radius: 14px;
-        overflow: hidden;
-    }}
-
-    /* 整个聊天区上覆盖一层轻薄遮罩，保证文字可读 */
-    #story-chat::before {{
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(255, 248, 224, 0.20);
-        pointer-events: none;
-        z-index: 0;
-    }}
-
-    #story-chat > * {{
-        position: relative;
-        z-index: 1;
-    }}
-
-    /* 把聊天内部默认底色清掉，确保整块背景图可见 */
-    #story-chat .wrap,
-    #story-chat .panel-wrap,
-    #story-chat .message-wrap,
-    #story-chat .bubble-wrap {{
-        background: transparent !important;
-    }}
-
-    /* 气泡半透明，背景图会在气泡下可见 */
-    #story-chat .message,
-    #story-chat .message.user,
-    #story-chat .message.bot {{
-        background: rgba(255, 252, 243, 0.55) !important;
-        border: 1px solid rgba(106, 73, 43, 0.25) !important;
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
-    }}
-    #story-chat .message.user {{
-        background: rgba(255, 236, 196, 0.58) !important;
-    }}
-    </style>
-    <div style="display:none">scene:{scene_name}</div>
-    """
-    return html
 
 
 # =====================================================
@@ -232,7 +155,6 @@ def on_start():
     chat = [{"role": "assistant", "content": OPENING_NARRATION}]
     logs = []
     dlg_status, exit_visible = dialogue_updates(state)
-    bg_html = get_scene_background_html(state.current_scene)
     return (
         chat, state, logs,
         render_scene_panel(state),
@@ -240,7 +162,6 @@ def on_start():
         render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
-        bg_html,
         *_btn_updates(suggestions),
     )
 
@@ -256,7 +177,6 @@ def on_submit(player_input: str, chat: list, state: GameState, logs: list):
     chat.append({"role": "assistant", "content": response})
 
     dlg_status, exit_visible = dialogue_updates(state)
-    bg_html = get_scene_background_html(state.current_scene)
     return (
         "",
         chat, state, logs,
@@ -265,7 +185,6 @@ def on_submit(player_input: str, chat: list, state: GameState, logs: list):
         render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
-        bg_html,
         glogger.format_log_for_display(logs),
         *_btn_updates(suggestions),
     )
@@ -286,7 +205,6 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
 
     suggestions = get_suggestions(state)
     dlg_status, exit_visible = dialogue_updates(state)
-    bg_html = get_scene_background_html(state.current_scene)
     return (
         "",
         chat, state, logs,
@@ -295,7 +213,6 @@ def on_exit_dialogue(chat: list, state: GameState, logs: list):
         render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
-        bg_html,
         glogger.format_log_for_display(logs),
         *_btn_updates(suggestions),
     )
@@ -309,7 +226,6 @@ def _btn_updates(suggestions: List[str]):
 def _unchanged(chat, state, logs):
     suggestions = get_suggestions(state)
     dlg_status, exit_visible = dialogue_updates(state)
-    bg_html = get_scene_background_html(state.current_scene)
     return (
         chat, state, logs,
         render_scene_panel(state),
@@ -317,7 +233,6 @@ def _unchanged(chat, state, logs):
         render_quest_panel(state),
         dlg_status, exit_visible,
         render_ending_panel(state),
-        bg_html,
         glogger.format_log_for_display(logs),
         *_btn_updates(suggestions),
     )
@@ -418,7 +333,7 @@ def build_ui():
         }
 
         #story-chat .wrap {
-            background: transparent;
+            background: linear-gradient(180deg, #fff8ea 0%, #fff2d9 100%);
         }
 
         #dialogue-bar {
@@ -564,15 +479,12 @@ def build_ui():
                     elem_id="log-box",
                 )
 
-        # ===== 背景样式注入组件（需渲染到DOM，不能visible=False） =====
-        scene_bg_style = gr.HTML(value="", elem_id="scene-bg-style-host")
-
         # ===== 统一输出结构 =====
         core_outputs = [
             chatbot, game_state, log_data,
             scene_panel, affinity_panel, quest_panel,
             dialogue_status, exit_btn,
-            ending_panel, scene_bg_style,
+            ending_panel,
         ]
         submit_outputs = core_outputs + [log_display, btn0, btn1, btn2, btn3]
         start_outputs  = core_outputs + [btn0, btn1, btn2, btn3]
@@ -611,9 +523,4 @@ def build_ui():
 
 if __name__ == "__main__":
     ui = build_ui()
-    ui.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        allowed_paths=["/workspaces/story1/assets/scenes"],
-    )
+    ui.launch(server_name="0.0.0.0", server_port=7860, share=False)

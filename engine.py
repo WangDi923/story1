@@ -186,17 +186,6 @@ def _dispatch_intent(nlu: NLUResult, raw: str, state: GameState,
     if nlu.confidence < config.NLU_CONFIDENCE_THRESHOLD and intent != "UNKNOWN":
         intent = "UNKNOWN"
 
-    # ===== 特殊场景 fallback：森林存粮处的攻击行为 =====
-    # 如果 NLU 识别为 UNKNOWN，但在森林存粮处且输入包含攻击词汇，转为 BARK
-    if (intent == "UNKNOWN" and state.current_scene == "forest" and 
-        check_quest_trigger("squirrel", "chase_wildcat", state)):
-        attack_keywords = ["攻击", "打", "打跑", "防卫", "防守", "咬", "撕咬", "扑", "咬伤", "咬死", "驱赶", "赶", "阻止"]
-        if any(kw in raw for kw in attack_keywords):
-            print(f"[DEBUG] FALLBACK: Converted UNKNOWN to BARK for attacking wildcat")
-            intent = "BARK"
-            target = "stash"  # 攻击的是存粮处/野猫
-            log["note"] = "fallback_attack_conversion"
-
     # ===== 搞砸行为关键词检测（NLU可能识别不出来） =====
     mischief = _check_mischief(raw, state, log)
     if mischief:
@@ -403,10 +392,8 @@ def _handle_explore(target: str, raw: str, state: GameState, log: Dict) -> Tuple
 
     # 森林存粮处：可触发赶野猫（需要前置探索完成）
     if scene == "forest" and target == "stash":
-        # 探索存粮处直接触发赶野猫（如果任务到了这步）
+        # 探索存粮处也可以触发赶野猫（如果任务到了这步）
         if check_quest_trigger("squirrel", "chase_wildcat", state):
-            print(f"[DEBUG] EXPLORE stash: chase_wildcat triggered!")
-            print(f"  - current affinity[squirrel]: {state.npc_affinity.get('squirrel', 0)}")
             delta = state.adjust_affinity("squirrel", "chase_wildcat")
             if delta:
                 changes.append(f"affinity[squirrel] += {delta}")
@@ -415,18 +402,13 @@ def _handle_explore(target: str, raw: str, state: GameState, log: Dict) -> Tuple
             log["state_changes"].extend(changes)
             narration = _nlg.generate_narration("forest_chase_wildcat", raw, state)
             if effects.get("ending"):
-                print(f"[DEBUG] ending triggered: {effects['ending']}")
                 aff = state.npc_affinity.get("squirrel", 0)
                 fail_threshold = SCENE2_FAIL_THRESHOLD.get("forest", 20)
-                print(f"  - affinity after adjust: {aff}, threshold: {fail_threshold}")
                 if aff >= fail_threshold:
                     state.ending = effects["ending"]
                     state.game_over = True
-                    print(f"[DEBUG] ✅ GAME OVER SET! ending={state.ending}, game_over={state.game_over}")
                     ending_text = _nlg.generate_ending(effects["ending"], state)
                     narration += f"\n\n{'─'*40}\n\n{ending_text}"
-                else:
-                    print(f"[DEBUG] ❌ Affinity too low! {aff} < {fail_threshold}")
             return narration, state
 
     state.mark_explored(target)
@@ -449,7 +431,6 @@ def _handle_approach(target: str, raw: str, state: GameState, log: Dict) -> Tupl
 def _handle_bark(target: str, raw: str, state: GameState, log: Dict) -> Tuple[str, GameState]:
     changes = []
     mainline = _get_mainline_for_npc(target) if target in ALL_NPCS else None
-    scene = state.current_scene
 
     # 吠叫通常是负面行为
     if target in ALL_NPCS and mainline:
@@ -469,6 +450,7 @@ def _handle_bark(target: str, raw: str, state: GameState, log: Dict) -> Tuple[st
         if delta:
             changes.append(f"affinity[{mainline}] += {delta}")
 
+    scene = state.current_scene
     bark_labels = {
         ("forest", "owl"):    "forest_bark_owl",
         ("ruins", "zhang"):   "ruins_bark_zhang",
@@ -499,8 +481,6 @@ def _handle_hide(target: str, raw: str, state: GameState, log: Dict) -> Tuple[st
     # 森林：蹲守存粮处 = 赶野猫
     if state.current_scene == "forest" and target in ("stash", "burrow", ""):
         if check_quest_trigger("squirrel", "chase_wildcat", state):
-            print(f"[DEBUG] HIDE stash: chase_wildcat triggered!")
-            print(f"  - current affinity[squirrel]: {state.npc_affinity.get('squirrel', 0)}")
             delta = state.adjust_affinity("squirrel", "chase_wildcat")
             if delta:
                 changes.append(f"affinity[squirrel] += {delta}")
@@ -511,20 +491,15 @@ def _handle_hide(target: str, raw: str, state: GameState, log: Dict) -> Tuple[st
             narration = _nlg.generate_narration("forest_chase_wildcat", raw, state)
             # 检查是否触发结局
             if effects.get("ending"):
-                print(f"[DEBUG] ending triggered: {effects['ending']}")
                 ending = effects["ending"]
                 aff = state.npc_affinity.get("squirrel", 0)
                 fail_threshold = SCENE2_FAIL_THRESHOLD.get("forest", 20)
-                print(f"  - affinity after adjust: {aff}, threshold: {fail_threshold}")
                 if aff >= fail_threshold:
                     state.ending = ending
                     state.game_over = True
-                    print(f"[DEBUG] ✅ GAME OVER SET! ending={state.ending}, game_over={state.game_over}")
                     ending_text = _nlg.generate_ending(ending, state)
                     narration += f"\n\n{'─'*40}\n\n{ending_text}"
                     changes.append(f"ENDING: {ending}")
-                else:
-                    print(f"[DEBUG] ❌ Affinity too low! {aff} < {fail_threshold}")
             return narration, state
 
     return _nlg.generate_narration(f"hide_{target}", raw, state), state
@@ -825,10 +800,6 @@ def _find_best_npc(state: GameState) -> Optional[str]:
     best_aff = 0
     for npc, threshold in NPC_SCENE2_THRESHOLD.items():
         aff = state.npc_affinity.get(npc, 0)
-        # 调试：打印大爷的好感度和任务进度
-        if npc == "vendor":
-            quest = get_current_quest(npc, state)
-            print(f"[DEBUG] 大爷 - 好感度: {aff}/{threshold}, 任务: {state.npc_quest_step.get(npc, 0)}, 需求trigger: {quest.get('trigger') if quest else 'None'}")
         if aff >= threshold and aff > best_aff:
             best = npc
             best_aff = aff
